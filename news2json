@@ -104,7 +104,7 @@ my $head;
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.4.0-alpha23";
+my $GW_VERSION  = "0.4.0-alpha24";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
 my $PROTOCOL	= 'JNTP-Transitional';
@@ -158,7 +158,6 @@ POST: while (<STDIN>) {
 	my %send_ok;
 	my @feeds = split(/\s+/, $feed);
 	foreach (@feeds) {
-		logmsg('propose', 'info');
 		
 		## --------
 		## Part code from controlchan
@@ -182,6 +181,8 @@ POST: while (<STDIN>) {
 		my $article_string = '';
 		while (<$artfh>) {
 			$article_string .= $_;
+			
+		logmsg("article $article_string", 'info');
 		}
 		close $artfh  // next POST;
 
