@@ -104,7 +104,7 @@ my $head;
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.4.0-alpha1";
+my $GW_VERSION  = "0.4.0-alpha8";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
 my $PROTOCOL	= 'JNTP-Transitional';
@@ -157,10 +157,40 @@ POST: while (<STDIN>) {
 	my @feeds = split(/\s+/, $feed);
 	foreach (@feeds) {
 		$domain{$_} ||= $FROM_DOMAIN;
-
+		my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
+		my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
+		
+		
+		my %data = (
+			DataType => "Article",
+	    		DataID => $msgid  
+		);
+		my %propose1 = (
+			Jid => $sha1,
+			Data => \%data 
+		);
+		my %propose = (
+		From 	=> "usenet.pasdenom.info",
+		Propose => \%propose1
+		);  
+#    [
+#        "diffuse",
+#        {
+#            "Propose": [
+#                {
+#                    "Jid": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE",
+#                    "Data": {
+#                        "DataType": "Article",
+#                        "DataID": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE@devnews.nemoweb.net"
+#                    }
+#                }
+#            ],
+#            "From": "usenet.pasdenom.info"
+#        }
+#    ]
 		# LWP crée un agent et une requête
 		my $ua  = LWP::UserAgent->new( agent => $USER_AGENT);
-		my $json_string = jntp_request ("ihave", 'Jid', $curmsgid, $domain{$_});
+		my $json_string = jntp_request ("diffuse", %propose);
 		logmsg ( $_ .' > '.$json_string, 'info');
 		my $h = HTTP::Headers->new(Content_Type => 'application/json');
 		my $req = HTTP::Request->new( POST => "http://$_/jntp/",$h, $json_string );
