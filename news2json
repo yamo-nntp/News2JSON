@@ -1,12 +1,11 @@
-#! /usr/local/bin/perl -w
+#! /usr/bin/perl
 
 # Change this to according the INN perl lib location
-use lib '/usr/local/news/lib/perl'; use INN::Config;
+use lib '/usr/share/perl5'; use INN::Config;
 
 =head1 NAME
 
  news2json - News (RFC5536 / RFC1036) to JNTP (JSON) GateWay for INN
-
  Copyright (c) 2001 by Marco d'Itri <md@linux.it> for controlchan's parts code
  Copyright (c) 2014, Gérald Niel
 
@@ -20,7 +19,7 @@ use lib '/usr/local/news/lib/perl'; use INN::Config;
 
  In the INN's newsfeeds file, you need to have a channel feed:
 
- 	news2json!:!*:Ac,Tc,Wnm*:<pathbin>/news2json
+ 	news2json!:!*:Ac,Af,Tc,Wnm*:<pathbin>/news2json
 
  and a site for each of the various jntp site you're feeding,
  such as
@@ -48,16 +47,15 @@ use lib '/usr/local/news/lib/perl'; use INN::Config;
  Generate keys pair
  $ sudo -u news openssl genrsa -out <pathetc>/ssl/jntp.key 1024
  $ sudo -u news openssl rsa -in <pathetc>/ssl/jntp.key -pubout > <pathetc>/ssl/jntp.cert
-
+ 
+=head1 CHANGELOG
+ - Versions 0.4.* : rewrite of 0.3.0-pre01 from 0.2.12 for the new version of JNTP Protocol
+ - Versions 0.3.* : abandonned 
+ - Versions 0.2.* : Works with Inn and channel feed (last stable version 0.2.12)
+ - Versions 0.1.* : local versions (for testing format of JNTP article)
 =head1 DESCRIPTION
 
  News (NNTP) to JSON (JNTP) channel backend.
-
-=head1 CHANGELOG
-
- - Versions 0.3.* : new version of JNTP Protocol
- - Versions 0.2.* : Works with Inn and channel feed
- - Versions 0.1.* : local versions (for testing format of JNTP article)
 
 =head1 AUTHOR
 
@@ -71,11 +69,10 @@ use lib '/usr/local/news/lib/perl'; use INN::Config;
 
  Some parts of this program come from Inn's controlchan and are
  Copyright 2001 by Marco d'Itri <md@linux.it>
- See comments below on these code's parts.
-
 =cut
 
 use strict;
+use warnings;
 use utf8;
 
 use JSON;
@@ -91,20 +88,28 @@ use Digest::SHA;
 use Crypt::OpenSSL::RSA;
 use MIME::Base64;
 
+# Declare the subroutines
+sub trim($);
+
 # globals
-my $article_id;
+
+
+my $curmsgid;
 my %domain;
-my (%article, %data);
+my %article;
+my %data;
+my $parser;
+my $ent;
+my $head;
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.3.0-pre01";
+my $GW_VERSION  = "0.4.0-alpha1";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
-my $ORIGIN		= 'NNTP';
-# DataType must be article at this time.
-# But could be 'NetNews' or other DataType(s) for each feeds.
-# TODO : ad this to conf file.
+my $PROTOCOL	= 'JNTP-Transitional';
+my $PROTOCOL_V	= '0.20.1';
+my $ORIGIN	= 'NNTP';
 my $DATATYPE	= 'Article';
 
 my $conf_file = $INN::Config::newsetc.'/news2json.cf';
@@ -115,7 +120,7 @@ my $privkey = read_file($INN::Config::newsetc.'/ssl/jntp.key');
 # Set logging
 my $debug = 0;
 my $use_syslog = 1; # this is really verbose at this time!
-					# probably better to log jntp dialog in a deticated logfile (TODO)
+# probably better to log jntp dialog in a deticated logfile (TODO)
 eval { require Sys::Syslog; import Sys::Syslog; $use_syslog = 1; };
 
 if ($use_syslog) {
@@ -123,10 +128,10 @@ if ($use_syslog) {
         eval "sub Sys::Syslog::_PATH_LOG { '/dev/log' }" if $^O eq 'dec_osf';
         Sys::Syslog::setlogsock('unix') if $^O =~ /linux|dec_osf|freebsd|darwin/;
     }
-    openlog('news2json', 'pid', $INN::Config::syslog_facility);
+    openlog("$GW_NAME-$GW_VERSION", 'pid', $INN::Config::syslog_facility);
 }
 
-logmsg('starting');
+logmsg('starting', 'info');
 
 ## Read conf File
 if (-e($conf_file) && -r($conf_file)) {
@@ -140,11 +145,11 @@ if (-e($conf_file) && -r($conf_file)) {
 	}
 }
 
-while (<STDIN>) {
+POST: while (<STDIN>) {
 	chop;
 	my ($token, $msgid, $feed) = split(/\s+/, $_, 3);
-	($article_id = $msgid || '') =~ s/<(.*?)\>/$1/;
-	next if (!defined($token) || !$article_id || !defined($feed));
+	($curmsgid = $msgid || '') =~ s/<(.*?)\>/$1/;
+	next if (!defined($token) || !$curmsgid || !defined($feed));
 
 
 	# Test if feed(s) want the article, do nothing if not
@@ -155,7 +160,7 @@ while (<STDIN>) {
 
 		# LWP crée un agent et une requête
 		my $ua  = LWP::UserAgent->new( agent => $USER_AGENT);
-		my $json_string = jntp_request ("ihave", 'Jid', $article_id, $domain{$_});
+		my $json_string = jntp_request ("ihave", 'Jid', $curmsgid, $domain{$_});
 		logmsg ( $_ .' > '.$json_string, 'info');
 		my $h = HTTP::Headers->new(Content_Type => 'application/json');
 		my $req = HTTP::Request->new( POST => "http://$_/jntp/",$h, $json_string );
@@ -165,11 +170,19 @@ while (<STDIN>) {
 		logmsg ( $_. ' < ' . $res, 'info');
 
 		my $json_resp = JSON->new->decode($res);
-
-		if (ref($json_resp) eq 'ARRAY' && scalar(grep $_, @$json_resp) > 0
-			&& $$json_resp[0] eq "iwant" && scalar(grep $_, $$json_resp[1]{'Jid'}[0]) > 0
-			&& $$json_resp[1]{'Jid'}[0] eq $article_id) {
-			$send_ok{$_} = 1;
+		
+		if(length($$json_resp[1]{'Jid'}[0])>3){
+			if (ref($json_resp) eq 'ARRAY' && scalar(grep $_, @$json_resp) > 0
+				&& $$json_resp[0] eq "iwant" && scalar(grep $_, $$json_resp[1]{'Jid'}[0]) > 0
+				&& $$json_resp[1]{'Jid'}[0] eq $curmsgid) {
+				$send_ok{$_} = 1;
+			} else { 
+					logmsg ("send_ko : $msgid $_" , 'info');
+					next; 
+				}
+		} else { 
+			logmsg ("bad_response : $msgid $_" , 'info');
+			next; 
 		}
 	}
 
@@ -198,37 +211,27 @@ while (<STDIN>) {
 		while (<$artfh>) {
 			$article_string .= $_;
 		}
-		close $artfh or logdie('sm died with status ' . ($? >> 8));
+		close $artfh  // next POST;
 
 		## --------
-
+		#%article = n2j($article_string);
 		(%article, %data) = n2j($article_string);
+
 		next if ( !scalar(keys %article) );
 	}
 	else { next; }
 
 	foreach (@feeds) {
 		if ($send_ok{$_}) {
-
-			$data{'OriginServer'} = $domain{$_};
-			$article{'Data'} = \%data;
-
-			# encode data to json string and calcul Jid
-			my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
-			my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
-			$article{'Jid'} = $sha1.'@'.$domain{$_};
-			# sign article Jid
+			$article{'Route'}[0] = $domain{$_};
 			my $rsa_priv = Crypt::OpenSSL::RSA->new_private_key($privkey);
 			my $signature = $rsa_priv->sign($article{'Jid'});
 			$signature = encode_base64($signature);
 			chomp ($signature);
-
 			$article{'ServerSign'} = $signature;
-			$article{'Route'}[0] = $domain{$_};
-
 			my $ua  = LWP::UserAgent->new( agent => $USER_AGENT);
 			my $json_string = jntp_request ("diffuse", 'Packet', \%article, $domain{$_});
-			logmsg($_.' > diffuse : <'.$article_id.'>', 'info');
+			logmsg($_.' > diffuse : <'.$curmsgid.'>', 'info');
 			my $h = HTTP::Headers->new(Content_Type => 'application/json');
 			my $req = HTTP::Request->new( POST => "http://$_/jntp/",$h, $json_string );
 			my $res = $ua->request($req);
@@ -240,7 +243,7 @@ while (<STDIN>) {
 	}
 }
 
-logmsg('closed');
+logmsg('closed', 'info');
 closelog() if $use_syslog;
 exit 0;
 
@@ -248,10 +251,11 @@ exit 0;
 sub n2j {
 	my ($art) = @_;
 
-    my $parser = new MIME::Parser;
+    $parser = new MIME::Parser;
     $parser->output_dir("$INN::Config::pathtmp");
-    my $ent  = $parser->parse_data($art);
-	my $head = $ent->head;
+    $ent  = $parser->parse_data($art);
+
+	$head = $ent->head;
 
 	# Article is empty or does not exist.
 	if (not $head->stringify) {
@@ -283,40 +287,47 @@ sub n2j {
 	# Hashs for JSON Object
 	# need to isolate data for sha Jid (for next version of JNTP Protocol)
 	my %data = (
-		DataType		=> $DATATYPE,
-    	FromName		=> '',
-    	FromMail		=> '',
-    	Subject			=> '',
-        Newsgroups		=> [],
-        FollowupTo		=> [],
-        References		=> [],
-        Origin			=> $ORIGIN,
-        OriginServer	=> $FROM_DOMAIN,
-        OrignHeaders	=> '',
-        Server			=> $USER_AGENT,
-        ServerPublicKey	=> $pubkey,
-        '*ThreadID'		=> '',
-        '*ArticleID'	=> ( $article_id ? $article_id : '');
+		DataType => $DATATYPE,
+    	FromName => '',
+    	FromMail => '',
+    	Subject => '',
+        Newsgroups => [],
+        FollowupTo => [],
+        References => [],
+        Protocol => $PROTOCOL,
+        ProtocolVersion => $PROTOCOL_V,
+        Origin => $ORIGIN,
+        Server => $USER_AGENT,
+        ServerPublicKey => $pubkey,
+        ThreadID => '',
         Body => ''
 	);
+	$article{'Data'} = \%data;
+
+    # encode data to json string and calcul Jid
+    	my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
+	my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
+	#$article{'Jid'} = $sha1.'@'.$domain{$_};
     my %article = (
         Route => [$FROM_DOMAIN],
-        Jid => '',
+        Jid =>  $sha1,
         Data => \%data,
         ID => '',
         Media => []
     );
 	foreach (@$headers) {
+
 		my @header = split(':',$_, 2);
 		my $key = lc($header[0]);
 		my $value = $ent->head->get($key);
 		# Test if already sent from jntp, die if true.
         if (($key eq "path" && index($value, "!from-jntp") !=-1) || $key eq "jntp-protocol") {
 			$parser->filer->purge;
-            logmsg ("<$article_id> already sent from jntp!", 'info');
+            logmsg ("<$curmsgid> already sent from jntp!", 'notice');
 			return undef;
         }
         if ($value && $key ne "xref" && $key ne "message-id") {
+
         	# First try to convert to utf8 non mime-encoded header
 			my $c_head = detect($value);
 			$value = decode($c_head, $value) if (defined($c_head));
@@ -364,12 +375,17 @@ sub n2j {
         		($fromname = $addr->phrase) =~ s/\"(.*?)\"/$1/;
         		$fromname = $fromname.' '.$addr->comment if ($fromname && $addr->comment);
         		($fromname ||= $addr->comment) =~  s/\((.*?)\)/$1/ if (!$fromname);
+			# Trouble with spaces
+                        $fromname =~ s/(\ [\^:\.\@]\ ?)/trim($&)/e;
+			$fromname =~ s/(\ ?[\^:\.\@]\ )/trim($&)/e;
         		$data{'FromName'} = ($fromname ? $fromname : '');
         		$data{'FromMail'} = $addr->address;
         		next;
         	}
         	elsif ( grep { $key eq $_ } (qw(injection-date nntp-posting-date)) ) {
-        		$injectiondate = httpdate($value);
+        		# $injectiondate = httpdate($value);
+			# Hack by Julien Arlandis
+			$injectiondate = httpdate(DateTime->now());
         		$data{'OriginHeaders'}{$header[0]} = $value;
         		next;
         	}
@@ -420,8 +436,7 @@ sub n2j {
 	$injectiondate ||= httpdate(DateTime->now());
 	$data{'InjectionDate'} = $injectiondate;
 
-	# Set Data/*ThreadID if some refernces, else keep empty.
-	$data{'*ThreadID'} = ( (scalar(grep $_, @ref) == 0) ? $article_id : '' );
+	$data{'ThreadID'} = $article{'Jid'} if (scalar(grep $_, @ref) == 0 && defined($article{'Jid'}));
 
 	# Body
 	$mime_type = $ent->mime_type;
@@ -520,7 +535,6 @@ sub jntp_request {
 # InjectionDate
 sub httpdate {
     my ($date) = @_;
-
     my $dt = DateTime::Format::HTTP->parse_datetime($date);
     $dt = $dt->clone()->set_time_zone('UTC');
     return undef if ($dt > DateTime->now());
@@ -541,7 +555,7 @@ sub read_file {
 }
 
 ## -------
-##  Part code from controlchan
+##  Part code of controlchan
 ##
 ##  Copyright 2001 by Marco d'Itri <md@linux.it>
 ##
@@ -587,10 +601,20 @@ sub logmsg {
 sub logdie {
     my ($msg, $lvl) = @_;
 
-    $msg .= " ($article_id)" if $article_id;
+    $msg .= " ($curmsgid)" if $curmsgid;
     logmsg($msg, $lvl || 'err');
     closelog() if $use_syslog;
     exit 1;
+}
+
+
+# Perl trim functon to remove whitespace from the start and end of the string
+sub trim($)
+{
+	my $string = shift;
+	$string =~ s/^\s+//;
+	$string =~ s/\s+$//;
+	return $string;
 }
 
 ## -------
