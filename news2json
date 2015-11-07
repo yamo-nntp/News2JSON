@@ -104,7 +104,7 @@ my $head;
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.4.0-alpha30";
+my $GW_VERSION  = "0.4.0-alpha36";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
 my $PROTOCOL	= 'JNTP-Transitional';
@@ -197,29 +197,34 @@ POST: while (<STDIN>) {
 		my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
 		my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
 		logmsg("Jid : $sha1 MiD : $msgid", 'info');
+		$msgid =~ s/<//g;
+		$msgid =~ s/>//g;
 		#my $jsonPropose =JSON->new->utf8->canonical(1)->encode({Propose=>{Jid => $sha1,data =>{DataType => 'Article',DataID => $msgid}}});
-		my $jsonPropose = "{\"diffuse\", {\"Propose\": [{\"Jid\": \"$sha1\", \"Data\": {\"DataType\": \"Article\", \"DataID\": \"$msgid\"}], \"From\": \"usenet.pasdenom.info\"}}";
+		my $jsonPropose = "[
+			\"diffuse\", 
+			{\"Propose\": [
+					{
+						\"Jid\": \"$sha1\",
+						 \"Data\": 
+						 	{
+						 		\"DataType\": \"Article\", 
+						 		\"DataID\": \"$msgid\"
+						 	}
+					}
+				], \"From\": \"usenet.pasdenom.info\" 
+			}
+		]";
+		 $jsonPropose=~ s/\s*//g;
+		 $jsonPropose=~ s/,/, /g;
+		 $jsonPropose=~ s/:/: /g;
+		 $jsonPropose=~ s/{/{ /g;
+		 $jsonPropose=~ s/}/ }/g;
+		 $jsonPropose=~ s/\[/\[ /g;
+		 $jsonPropose=~ s/\]/ \]/g;
+		
 		#my $jsonPropose = '{"Propose": {"Jid": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE","Data": {"DataType": "Article","DataID": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE\@devnews.nemoweb.net"}}}';
 		
-		
-		 
-		  
-#    [
-#        "diffuse",
-#        {
-#            "Propose": [
-#                {
-#                    "Jid": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE",
-#                    "Data": {
-#                        "DataType": ,
-#                        "DataID": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE@devnews.nemoweb.net"
-#                    }
-#                }
-#            ],
-#            "From": "usenet.pasdenom.info"
-#        }
-#    ]
-		
+	 
 		#my $json_string = jntp_request2 ("diffuse", $jsonPropose);
 		
 		#my ($command, $key, $data, $domain) = @_;
