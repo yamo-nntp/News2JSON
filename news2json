@@ -104,7 +104,7 @@ my $head;
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.4.0-alpha36";
+my $GW_VERSION  = "0.4.0-alpha43";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
 my $PROTOCOL	= 'JNTP-Transitional';
@@ -195,33 +195,38 @@ POST: while (<STDIN>) {
 		my %jsonPropose;
 		$domain{$_} ||= $FROM_DOMAIN;
 		my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
-		my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
-		logmsg("Jid : $sha1 MiD : $msgid", 'info');
+		#my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
+		#logmsg("Jid : $sha1 MiD : $msgid", 'info');
 		$msgid =~ s/<//g;
 		$msgid =~ s/>//g;
 		#my $jsonPropose =JSON->new->utf8->canonical(1)->encode({Propose=>{Jid => $sha1,data =>{DataType => 'Article',DataID => $msgid}}});
-		my $jsonPropose = "[
-			\"diffuse\", 
-			{\"Propose\": [
-					{
-						\"Jid\": \"$sha1\",
-						 \"Data\": 
-						 	{
-						 		\"DataType\": \"Article\", 
-						 		\"DataID\": \"$msgid\"
-						 	}
-					}
-				], \"From\": \"usenet.pasdenom.info\" 
-			}
-		]";
-		 $jsonPropose=~ s/\s*//g;
-		 $jsonPropose=~ s/,/, /g;
-		 $jsonPropose=~ s/:/: /g;
-		 $jsonPropose=~ s/{/{ /g;
-		 $jsonPropose=~ s/}/ }/g;
-		 $jsonPropose=~ s/\[/\[ /g;
-		 $jsonPropose=~ s/\]/ \]/g;
-		
+		# ["diffuse", {"Propose": partialPacket, "From": from}]
+		#https://github.com/Julien-Arlandis/phpNemoServer/blob/master/jntp_rfc.txt
+
+#		my $jsonPropose = "[
+#			\"diffuse\", 
+#			{\"Propose\": [
+#					{
+#						 \"Data\": 
+#						 	{
+#						 		\"DataType\": \"Article\", 
+#						 		\"DataID\": \"$msgid\"
+#						 	}
+#					}
+#				], \"From\": \"usenet.pasdenom.info\" 
+#			}
+#		]";
+#		 $jsonPropose=~ s/\s*//g;
+#		 $jsonPropose=~ s/,/, /g;
+#		 $jsonPropose=~ s/:/: /g;
+#		 $jsonPropose=~ s/{/{ /g;
+#	 $jsonPropose=~ s/}/ }/g;
+#		 $jsonPropose=~ s/\[/\[ /g;
+#		 $jsonPropose=~ s/\]/ \]/g;
+#		Ça se fait en deux temps comme actuellement.
+#1) ["diffuse",{"Propose":{"DataID":"xxxx"}}]
+		my $jsonPropose = "[\"diffuse\",{\"Propose\":{\"DataID\": \"$msgid\"}, \"From\": \"$domain{$_}\"}]";
+#2) ["diffuse",{"Data":xxxx}]
 		#my $jsonPropose = '{"Propose": {"Jid": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE","Data": {"DataType": "Article","DataID": "EjfbxwMbhJ-Z_5XQh_dp5Ect2LE\@devnews.nemoweb.net"}}}';
 		
 	 
@@ -279,7 +284,9 @@ POST: while (<STDIN>) {
 			$signature = encode_base64($signature);
 			chomp ($signature);
 			$article{'ServerSign'} = $signature;
-			my $json_string = jntp_request ("diffuse", 'Packet', \%article, $domain{$_});
+			#["diffuse",{"Data":xxxx}]
+			my $json_string = jntp_request ("diffuse",  \%article, $domain{$_});
+			logmsg($json_string, 'info');
 			logmsg($_.' > diffuse : <'.$curmsgid.'>', 'info');
 			my $h = HTTP::Headers->new(Content_Type => 'application/json');
 			my $req = HTTP::Request->new( POST => "http://$_/jntp/",$h, $json_string );
@@ -335,6 +342,7 @@ sub n2j {
 
 	# Hashs for JSON Object
 	# need to isolate data for sha Jid (for next version of JNTP Protocol)
+	#2) ["diffuse",{"Data":xxxx}]
 	my %data = (
 		DataType => $DATATYPE,
     	FromName => '',
@@ -354,15 +362,11 @@ sub n2j {
 	$article{'Data'} = \%data;
 
     # encode data to json string and calcul Jid
-    	my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
-	my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
+    #	my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
+    #	my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
 	#$article{'Jid'} = $sha1.'@'.$domain{$_};
-    my %article = (
-        Route => [$FROM_DOMAIN],
-        Jid =>  $sha1,
-        Data => \%data,
-        ID => '',
-        Media => []
+    my %article = ( 
+        Data => \%data
     );
 	foreach (@$headers) {
 
@@ -516,7 +520,7 @@ sub n2j {
 		$body = decode($charset, $body)  if (defined($charset));
 		$data{'Body'} = $body;
 		$data{'Encoding'} = $ent->head->mime_encoding
-			if ($ent->head->mime_encoding && $ent->head->mime_encoding ne "8bit");
+		if ($ent->head->mime_encoding && $ent->head->mime_encoding ne "8bit");
 	}
 	# Multipart keep only text/plain if multipart/alternative
 	elsif ( defined($mime_type) && $mime_type eq 'multipart/alternative') {
