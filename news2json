@@ -80,14 +80,6 @@ use warnings;
 use utf8;
 
 use JSON;
-use MIME::Parser;
-use MIME::WordDecoder;
-use Mail::Address;
-use Encode;
-use Encode::Detect::Detector;
-use Digest::SHA;
-use Crypt::OpenSSL::RSA;
-use MIME::Base64;
 
 
 
@@ -101,7 +93,7 @@ my $article_string = '';
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.4.0-alpha58";
+my $GW_VERSION  = "0.4.0-alpha59";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
 my $DATATYPE	= 'NetNews';
