@@ -81,7 +81,17 @@ use utf8;
 
 use JSON;
 use JSON qw( decode_json );
-
+use MIME::Parser;
+use LWP::UserAgent;
+use MIME::WordDecoder;
+use Mail::Address;
+use Encode;
+use Encode::Detect::Detector;
+use DateTime;
+use DateTime::Format::HTTP;
+use Digest::SHA;
+use Crypt::OpenSSL::RSA;
+use MIME::Base64;
 
 # globals
 
@@ -93,7 +103,7 @@ my $article_string = '';
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.4.0-alpha61";
+my $GW_VERSION  = "0.4.0-alpha64";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
 my $DATATYPE	= 'NetNews';
@@ -230,8 +240,12 @@ my $jsonSend = <<"EOF";
 
 EOF
 	
-	
+		
+		logmsg ( "$jntp_server > $jsonSend", 'info');
 		$jsonSend = decode_json($jsonSend);
+		logmsg ( "$jntp_server > $jsonSend", 'info');
+		$jsonSend->[1]{'Data'}{'Body'} = getArticle();
+		logmsg ( "$jntp_server > $jsonSend", 'info');
 		$jsonSend = JSON->new->utf8->canonical(1)->encode($jsonSend);
 		
 		# $jsonSend=~ s/\s*//g;
@@ -243,9 +257,8 @@ EOF
 		# $jsonSend=~ s/\]/ \]/g;
 		
 
-		$jsonSend = decode_json($jsonSend);
-		$jsonSend->[1]{'Data'}{'Body'} = getArticle();
-		$jsonSend = encode_json($jsonSend);
+		
+		# $jsonSend = encode_json($jsonSend);
 				
 				
 		##dev uniquement sinon log trop bavard
