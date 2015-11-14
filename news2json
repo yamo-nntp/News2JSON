@@ -81,48 +81,32 @@ use utf8;
 
 use JSON;
 use MIME::Parser;
-use LWP::UserAgent;
 use MIME::WordDecoder;
 use Mail::Address;
 use Encode;
 use Encode::Detect::Detector;
-use DateTime;
-use DateTime::Format::HTTP;
 use Digest::SHA;
 use Crypt::OpenSSL::RSA;
 use MIME::Base64;
 
-# Declare the subroutines
-sub trim($);
+
 
 # globals
 
 
 my $curmsgid;
 my %domain;
-my %article;
-my %data;
-my $parser;
-my $ent;
-my $head;
+my $article_string = '';
+
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.4.0-alpha57";
+my $GW_VERSION  = "0.4.0-alpha58";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
-my $PROTOCOL	= 'JNTP-Transitional';
-my $PROTOCOL_V	= '0.20.1';
-my $ORIGIN	= 'NNTP';
 my $DATATYPE	= 'NetNews';
-my $article_string = '';
-# LWP crée un agent et une requête
-my $ua  = LWP::UserAgent->new( agent => $USER_AGENT);
-
+#pour contourner le bug sur le hostname des serveurs JNTP
 my $conf_file = $INN::Config::newsetc.'/news2json.cf';
-# SSL Keys
-my $pubkey = read_file($INN::Config::newsetc.'/ssl/jntp.cert');
-my $privkey = read_file($INN::Config::newsetc.'/ssl/jntp.key');
 
 # Set logging
 my $debug = 0;
@@ -186,22 +170,16 @@ POST: while (<STDIN>) {
 		
 		while (<$artfh>) {
 			$article_string .= $_;
-			
-		#logmsg("article $article_string", 'info');
+			#log extrèmement bavard
+			#logmsg("article $article_string", 'info');
 		}
 		close $artfh  // next POST;
 
-		## --------
-		#%article = n2j($article_string);
-		#(%article, %data) = n2j($article_string);
 		
 		
 		
 		my %jsonPropose;
 		$domain{$jntp_server} ||= $FROM_DOMAIN;
-		#my $json_data = JSON->new->utf8->canonical(1)->encode(\%data);
-		#my $sha1 = Digest::SHA->new->add($json_data)->hexdigest;
-		#logmsg("Jid : $sha1 MiD : $msgid", 'info');
 		$msgid =~ s/<//g;
 		$msgid =~ s/>//g;
 		
@@ -223,13 +201,13 @@ my $jsonPropose = <<"EOF";
 EOF
 	
 		
-		 $jsonPropose=~ s/\s*//g;
-		 $jsonPropose=~ s/,/, /g;
-		 $jsonPropose=~ s/:/: /g;
-		 $jsonPropose=~ s/{/{ /g;
-	 	 $jsonPropose=~ s/}/ }/g;
-		 $jsonPropose=~ s/\[/\[ /g;
-		 $jsonPropose=~ s/\]/ \]/g;
+		# $jsonPropose=~ s/\s*//g;
+		# $jsonPropose=~ s/,/, /g;
+		# $jsonPropose=~ s/:/: /g;
+		# $jsonPropose=~ s/{/{ /g;
+	 	# $jsonPropose=~ s/}/ }/g;
+		# $jsonPropose=~ s/\[/\[ /g;
+		# $jsonPropose=~ s/\]/ \]/g;
 		
 		##dev uniquement sinon log trop bavard
 		logmsg ( "$jntp_server > $jsonPropose", 'info');
@@ -260,13 +238,13 @@ my $jsonSend = <<"EOF";
 EOF
 	
 	
-		 $jsonSend=~ s/\s*//g;
-		 $jsonSend=~ s/,/, /g;
-		 $jsonSend=~ s/:/: /g;
-		 $jsonSend=~ s/{/{ /g;
-	 	 $jsonSend=~ s/}/ }/g;
-		 $jsonSend=~ s/\[/\[ /g;
-		 $jsonSend=~ s/\]/ \]/g;
+		 # $jsonSend=~ s/\s*//g;
+		 # $jsonSend=~ s/,/, /g;
+		 # $jsonSend=~ s/:/: /g;
+		 # $jsonSend=~ s/{/{ /g;
+	 	 # $jsonSend=~ s/}/ }/g;
+		 # $jsonSend=~ s/\[/\[ /g;
+		 # $jsonSend=~ s/\]/ \]/g;
 		
 
 		$jsonSend = decode_json($jsonSend);
@@ -290,18 +268,7 @@ closelog() if $use_syslog;
 exit 0;
  
 
- 
- 
-# InjectionDate
-sub httpdate {
-    my ($date) = @_;
-    my $dt = DateTime::Format::HTTP->parse_datetime($date);
-    $dt = $dt->clone()->set_time_zone('UTC');
-    return undef if ($dt > DateTime->now());
-    $dt = $dt->strftime("%FT%TZ");
 
-    return $dt;
-}
 
 # Read file by lines and return string.
 sub read_file {
@@ -380,14 +347,6 @@ sub logdie {
 }
 
 
-# Perl trim functon to remove whitespace from the start and end of the string
-sub trim($)
-{
-	my $string = shift;
-	$string =~ s/^\s+//;
-	$string =~ s/\s+$//;
-	return $string;
-}
 
 ## -------
 
