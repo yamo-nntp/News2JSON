@@ -98,7 +98,7 @@ my $head;
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.2.12";
+my $GW_VERSION  = "0.2.13";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 my $FROM_DOMAIN = $INN::Config::fromhost;
 my $PROTOCOL	= 'JNTP-Transitional';
@@ -118,10 +118,10 @@ my $use_syslog = 1; # this is really verbose at this time!
 eval { require Sys::Syslog; import Sys::Syslog; $use_syslog = 1; };
 
 if ($use_syslog) {
-    if ($Sys::Syslog::VERSION < 0.15) {
-        eval "sub Sys::Syslog::_PATH_LOG { '/dev/log' }" if $^O eq 'dec_osf';
-        Sys::Syslog::setlogsock('unix') if $^O =~ /linux|dec_osf|freebsd|darwin/;
-    }
+ #   if ($Sys::Syslog::VERSION < 0.15) {
+ #       eval "sub Sys::Syslog::_PATH_LOG { '/dev/log' }" if $^O eq 'dec_osf';
+ #       Sys::Syslog::setlogsock('unix') if $^O =~ /linux|dec_osf|freebsd|darwin/;
+ #  }
     openlog("$GW_NAME-$GW_VERSION", 'pid', $INN::Config::syslog_facility);
 }
 
