@@ -112,16 +112,16 @@ my $pubkey = read_file($INN::Config::newsetc.'/ssl/jntp.cert');
 my $privkey = read_file($INN::Config::newsetc.'/ssl/jntp.key');
 
 # Set logging
-my $debug = 0;
-my $use_syslog = 1; # this is really verbose at this time!
+my $debug = 1;
+my $use_syslog = 0; # this is really verbose at this time!
 					# probably better to log jntp dialog in a deticated logfile (TODO)
 eval { require Sys::Syslog; import Sys::Syslog; $use_syslog = 1; };
 
 if ($use_syslog) {
- #   if ($Sys::Syslog::VERSION < 0.15) {
- #       eval "sub Sys::Syslog::_PATH_LOG { '/dev/log' }" if $^O eq 'dec_osf';
- #       Sys::Syslog::setlogsock('unix') if $^O =~ /linux|dec_osf|freebsd|darwin/;
- #  }
+#    if ($Sys::Syslog::VERSION < 0.15) {
+#        eval "sub Sys::Syslog::_PATH_LOG { '/dev/log' }" if $^O eq 'dec_osf';
+#        Sys::Syslog::setlogsock('unix') if $^O =~ /linux|dec_osf|freebsd|darwin/;
+#    }
     openlog("$GW_NAME-$GW_VERSION", 'pid', $INN::Config::syslog_facility);
 }
 
@@ -165,18 +165,24 @@ POST: while (<STDIN>) {
 
 		my $json_resp = JSON->new->decode($res);
 		
-		if(length($$json_resp[1]{'Jid'}[0])>3){
-			if (ref($json_resp) eq 'ARRAY' && scalar(grep $_, @$json_resp) > 0
-				&& $$json_resp[0] eq "iwant" && scalar(grep $_, $$json_resp[1]{'Jid'}[0]) > 0
-				&& $$json_resp[1]{'Jid'}[0] eq $curmsgid) {
-				$send_ok{$_} = 1;
+		if (defined($$json_resp[1]{'Jid'}[0])){
+			
+			if(length($$json_resp[1]{'Jid'}[0])>3){
+				if (ref($json_resp) eq 'ARRAY' && scalar(grep $_, @$json_resp) > 0
+					&& $$json_resp[0] eq "iwant" && scalar(grep $_, $$json_resp[1]{'Jid'}[0]) > 0
+					&& $$json_resp[1]{'Jid'}[0] eq $curmsgid) {
+					$send_ok{$_} = 1;
+				} else { 
+						logmsg ("send_ko : $msgid $_" , 'info');
+						next; 
+					}
 			} else { 
-					logmsg ("send_ko : $msgid $_" , 'info');
+					logmsg ("bad_response : $msgid $_" , 'info');
 					next; 
-				}
-		} else { 
-				logmsg ("bad_response : $msgid $_" , 'info');
-				next; 
+			}
+		}else{ 
+			logmsg ("bad_response : $msgid $_ no Jid!" , 'info');
+			next; 
 		}
 	}
 
