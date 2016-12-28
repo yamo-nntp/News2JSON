@@ -98,7 +98,7 @@ my $head;
 
 # Global config (constant in upper case)
 my $GW_NAME     = "News2Json";
-my $GW_VERSION  = "0.2.14";
+my $GW_VERSION  = "0.3.0";
 my $USER_AGENT	= "$GW_NAME/$GW_VERSION";
 # LWP crée un agent et une requête
 my $ua  = LWP::UserAgent->new( agent => $USER_AGENT);
@@ -124,9 +124,11 @@ my $h = HTTP::Headers->new(Content_Type => 'application/json');
 
 #
 my $wd = supported MIME::WordDecoder 'UTF-8';
+my $opentag = "[signature]";
+my $closetag = "[/signature]";
 
 # Set logging
-my $debug = 1;
+my $debug = 0;
 my $use_syslog = 1; # this is really verbose at this time!
 # probably better to log jntp dialog in a deticated logfile (TODO)
 eval { require Sys::Syslog; import Sys::Syslog; $use_syslog = 1; };
@@ -157,47 +159,9 @@ POST: while (<STDIN>) {
 	chop;
 	my ($token, $msgid, $feed) = split(/\s+/, $_, 3);
 	($curmsgid = $msgid || '') =~ s/<(.*?)\>/$1/;
+	logmsg('"'.$curmsgid.'"', 'debug');
 	next if (!defined($token) || !$curmsgid || !defined($feed));
-
-	# Test if feed(s) want the article, do nothing if not
-	my %send_ok;
 	my @feeds = split(/\s+/, $feed);
-	foreach (@feeds) {
-		$domain{$_} ||= $FROM_DOMAIN;
-
-		my $json_string = jntp_request ("ihave", 'Jid', $curmsgid, $domain{$_});
-		logmsg ( $_ .' > '.$json_string, 'info');
-		my $req = HTTP::Request->new( POST => "http://$_/jntp/",$h, $json_string );
-		my $res = $ua->request($req);
-		next if not $res->is_success;
-		$res = $res->content;
-		logmsg ( $_. ' < ' . $res, 'info');
-
-		my $json_resp = JSON->new->decode($res);
-		
-		if (defined($$json_resp[1]{'Jid'}[0])){
-			
-			if(length($$json_resp[1]{'Jid'}[0])>3){
-				if (ref($json_resp) eq 'ARRAY' && scalar(grep $_, @$json_resp) > 0
-					&& $$json_resp[0] eq "iwant" && scalar(grep $_, $$json_resp[1]{'Jid'}[0]) > 0
-					&& $$json_resp[1]{'Jid'}[0] eq $curmsgid) {
-					$send_ok{$_} = 1;
-					logmsg ("send_OK : $msgid $_" , 'info');
-				} else { 
-						logmsg ("send_ko : $msgid $_" , 'info');
-						next; 
-					}
-			} else { 
-					logmsg ("bad_response : $msgid $_" , 'info');
-					next; 
-			}
-		}else{ 
-			logmsg ("bad_response : $msgid $_ no Jid!" , 'info');
-			next; 
-		}
-	}
-
-	if ( scalar(keys %send_ok) ) {
 
 		## --------
 		## Part code of controlchan
@@ -228,11 +192,11 @@ POST: while (<STDIN>) {
 		%article = n2j($article_string);
 
 		next if ( !scalar(keys %article) );
-	}
-	else { next; }
+	 
 
 	foreach (@feeds) {
-		if ($send_ok{$_}) {
+		$domain{$_} ||= $FROM_DOMAIN;
+
 			$article{'Data'}{'OriginServer'} = $domain{$_};
 			$article{'Route'}[0] = $domain{$_};
 			#SSL
@@ -247,8 +211,7 @@ POST: while (<STDIN>) {
 			next if not $res->is_success;
 			$res = $res->content;
 			logmsg($_.' < '.$res, 'info');
-		}
-		else { next; }
+		
 	}
 }
 
@@ -458,8 +421,8 @@ sub n2j {
 		$body = join('', @$body);
 
 		# DataType::Article (signature)
-		my $closetag = "[/signature]";
-		$body =~ s/\n-- \n(?![\s\S]*\n-- \n)([\s\S]+)/\n[signature]$1$closetag/;
+		
+		$body =~ s/\n-- \n(?![\s\S]*\n-- \n)([\s\S]+)/\n$opentag$1$closetag/;
 
 		if (!defined($charset)) {
 			$charset = detect($body);
@@ -468,8 +431,7 @@ sub n2j {
 		}
 		$body = decode($charset, $body)  if (defined($charset));
 		$data{'Body'} = $body;
-		$data{'Encoding'} = $ent->head->mime_encoding
-			if ($ent->head->mime_encoding && $ent->head->mime_encoding ne "8bit");
+		$data{'Encoding'} = $ent->head->mime_encoding if ($ent->head->mime_encoding && $ent->head->mime_encoding ne "8bit");
 	}
 	# Multipart keep only text/plain if multipart/alternative
 	elsif ( defined($mime_type) && $mime_type eq 'multipart/alternative') {
@@ -490,8 +452,8 @@ sub n2j {
 				$data{$ORIGIN.'Headers'}{'MimeType'} = $subent->mime_type;
 				my $body = $subent->body;
 				$body = join('', @$body);
-				my $closetag = "[/signature]";
-				$body =~ s/\n-- \n(?![\s\S]*\n-- \n)([\s\S]+)/\n[signature]$1$closetag/;
+				
+				$body =~ s/\n-- \n(?![\s\S]*\n-- \n)([\s\S]+)/\n$opentag$1$closetag/;
 				$data{'Encoding'} = $subent->head->mime_encoding
 					if ($subent->head->mime_encoding
 					&& $subent->head->mime_encoding ne "8bit");
@@ -515,7 +477,6 @@ sub n2j {
 		return undef;
 	}
 	$article{'Data'} = \%data;
-
 	# purge tmp file
 	$parser->filer->purge;
 	return %article;
@@ -524,7 +485,6 @@ sub n2j {
 # JNTP request in json string
 sub jntp_request {
 	my ($command, $key, $data, $domain) = @_;
-
 	my @request = ($command);
 	my %argv = (
 		From	=>	$domain,
@@ -548,7 +508,6 @@ sub httpdate {
 # Read file by lines and return string.
 sub read_file {
 	my ($path) = @_;
-
 	open (my $file, '<', $path) or die $!;
 	my @lines = <$file>;
 	$file = join ('', @lines);
@@ -591,7 +550,6 @@ sub open_article {
 # Logging
 sub logmsg {
     my ($msg, $lvl) = @_;
-
     return if $lvl and $lvl eq 'debug' and not $debug;
     if ($use_syslog) {
         syslog($lvl || 'notice', '%s', $msg);
@@ -602,7 +560,6 @@ sub logmsg {
 
 sub logdie {
     my ($msg, $lvl) = @_;
-
     $msg .= " ($curmsgid)" if $curmsgid;
     logmsg($msg, $lvl || 'err');
     closelog() if $use_syslog;
@@ -622,4 +579,5 @@ sub trim($)
 ## -------
 
 __END__
+
 
