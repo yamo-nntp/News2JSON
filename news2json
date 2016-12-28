@@ -128,7 +128,7 @@ my $opentag = "[signature]";
 my $closetag = "[/signature]";
 
 # Set logging
-my $debug = 0;
+my $debug = 1;
 my $use_syslog = 1; # this is really verbose at this time!
 # probably better to log jntp dialog in a deticated logfile (TODO)
 eval { require Sys::Syslog; import Sys::Syslog; $use_syslog = 1; };
